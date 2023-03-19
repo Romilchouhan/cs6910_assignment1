@@ -6,14 +6,13 @@ import yaml
 from keras.datasets import fashion_mnist, mnist
 import matplotlib.pyplot as plt
 import argparse
-from network import Layer, LinearLayer, SoftmaxOutputLayer, ActivationLayer
+from network import Layer, LinearLayer, SoftmaxOutputLayer, ActivationLayer, DropoutLayer, BatchNormLayer
 from activations import Sigmoid, Softmax
 from loss import CrossEntropy, MSE
 from tqdm import tqdm
 from optimiser import SGD, MGD, NAG, Adam, RMSProp, Nadam, AdaGrad
 from feedforward import FeedForwardNet
 from sklearn.metrics import confusion_matrix, accuracy_score
-from sklearn.model_selection import train_test_split
 
 def data(dataset, scaling):
     if dataset == 'mnist':
@@ -29,7 +28,9 @@ def data(dataset, scaling):
     y_train = np.nan_to_num(y_train)
     y_test = np.nan_to_num(y_test)
     
-    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
+    # split the train set into train and validation set
+    X_val, y_val = X_train[40000:], y_train[40000:]
+    X_train, y_train = X_train[:40000], y_train[:40000]
 
     if scaling == "minmax":
         # do min-max scaling
@@ -37,9 +38,9 @@ def data(dataset, scaling):
         x_min_tr = np.min(X_train)
         x_max_ts = np.max(X_test)
         x_min_ts = np.min(X_test)
-        X_train = (X_train - x_max_tr) / (x_max_tr - x_min_tr)
-        X_val = (X_val - x_max_tr) / (x_max_tr - x_min_tr)
-        X_test = (X_test - x_max_ts) / (x_max_ts - x_min_ts)
+        X_train = (X_train - x_min_tr) / (x_max_tr - x_min_tr)
+        X_val = (X_val - x_min_tr) / (x_max_tr - x_min_tr)
+        X_test = (X_test - x_min_ts) / (x_max_ts - x_min_ts)
 
     elif scaling == "standard":
         # Rescale the images from [0, 255] to [0, 1]
@@ -67,12 +68,23 @@ def get_accuracy(predictions, targets):
 def train():
     X_train, y_train, X_val, y_val, X_test, y_test = data(args.dataset, args.scaling)
     print(f"X_train.shape: {X_train.shape}, y_train.shape: {y_train.shape}")
-    layers = []
-    layers.append((LinearLayer(X_train.shape[1], args.hidden_size, args.weight_init), ActivationLayer(args.activation)))
-    for i in range(args.num_layers):
-        layers.append((LinearLayer(args.hidden_size, args.hidden_size, args.weight_init), ActivationLayer(args.activation)))
-    layers.append((LinearLayer(args.hidden_size, y_train.shape[1], args.weight_init), SoftmaxOutputLayer(args.weight_decay)))
 
+    layers = []
+    layers.append(LinearLayer(X_train.shape[1], args.hidden_size, args.weight_init))
+    layers.append(ActivationLayer(args.activation))
+    if args.dropout_rate > 0:
+        layers.append(DropoutLayer(args.dropout_rate))
+    if args.batch_norm:
+        layers.append(BatchNormLayer(gamma=1, beta=0, momentum=0.9))
+    for i in range(args.num_layers):
+        layers.append(LinearLayer(args.hidden_size, args.hidden_size, args.weight_init))
+        layers.append(ActivationLayer(args.activation))
+        if args.dropout_rate > 0:
+            layers.append(DropoutLayer(args.dropout_rate))
+        if args.batch_norm:
+            layers.append(BatchNormLayer(gamma=1, beta=0, momentum=0.9))
+    layers.append(LinearLayer(args.hidden_size, y_train.shape[1], args.weight_init))
+    layers.append(SoftmaxOutputLayer(args.weight_decay))
 
     optim_params = {
         "sgd": [args.learning_rate],
@@ -99,7 +111,7 @@ def train():
         optimiser = SGD(*optim_params[args.optimiser])
 
     model = FeedForwardNet(layers)
-    epoch_train_costs, val_costs, val_accuracies = model.train(X_train, y_train, X_val, y_val, epochs=args.epochs, batch_size=args.batch_size, optimiser=optimiser, loss=args.loss)
+    epoch_train_costs, epoch_train_accuracy, val_costs, val_accuracies = model.train(X_train, y_train, X_val, y_val, epochs=args.epochs, batch_size=args.batch_size, optimiser=optimiser, loss=args.loss)
     # test the model
     test_cost, test_accuracy = test(model, X_test, y_test, num_batches=10)
     print(f"Test Cost: {test_cost}, Test Accuracy: {test_accuracy}")    
@@ -114,105 +126,22 @@ def test(model, X_test, y_test, num_batches):
         np.array_split(y_test, num_batches, axis=0)  # Y labels
     ))
 
-    total, correct = 0, 0
     for X, T in tqdm(XT_batches): # Iterate over batches
         # Forward propagation
-        activations = model.forward(X)
+        activations = model.forward(X, mode="test")
         # Compute the cost
         batch_cost = CrossEntropy().calc_loss(activations[-1], T)
         test_costs.append(batch_cost)
         # Compute the accuracy
         # test_accuracy = get_accuracy(activations[-1], T)
-        test_accuracy = get_accuracy(activations[-1], T)
+        test_accuracy = accuracy_score(np.argmax(T, axis=1), np.argmax(activations[-1], axis=1))
         test_accuracies.append(test_accuracy)
     test_accuracy = np.mean(test_accuracies)
-    # wandb.log({"test_cost": np.mean(test_costs), "test_accuracy": test_accuracy})
-    # wandb.save("model.onnx")
     return np.mean(test_costs), test_accuracy
 
 
-
-# # def train_wb():
-#     run = wandb.init()
-#     config = wandb.config
-#     wandb.run.name = "e_{}_hl_{}_opt_{}_bs_{}_init_{}_ac_{}".format(config.epochs,config.hidden_size,config.optimiser, \
-#             config.batch_size,config.weight_init,config.activation)  
-#     class argument:
-#         def __init__(self):
-#             self.wandb_project="assignment1"
-#             self.wandb_entity="chouhan-romil01"
-#             self.dataset="fashion_mnist"
-#             self.epochs=1
-#             self.batch_size=4
-#             self.loss="cross_entropy"
-#             self.optimiser="sgd"
-#             self.learning_rate=0.1
-#             self.momentum=0.5
-#             self.beta=0.5
-#             self.beta1=0.5
-#             self.beta2=0.5
-#             self.epsilon=0.000001
-#             self.weight_decay=.0
-#             self.weight_init="random"
-#             self.num_layers=1
-#             self.hidden_size=4
-#             self.activation="sigmoid"
-#     args = argument()
-
-#     optim_params = {
-#                 "sgd": [config.learning_rate],
-#                 "momentum": [config.learning_rate, args.momentum],
-#                 "nag": [config.learning_rate, args.momentum],
-#                 "rmsprop": [config.learning_rate, args.beta, args.epsilon],
-#                 "adam": [config.learning_rate, args.beta1, args.beta2, args.epsilon],
-#                 "nadam": [config.learning_rate, args.beta1, args.beta2, args.epsilon]
-#             }
-    
-#     if config.optimiser == "momentum":
-#         optimiser = MGD(*optim_params[config.optimiser])
-#     elif config.optimiser == "nag":
-#         optimiser = NAG(*optim_params[config.optimiser])
-#     elif config.optimiser == "rmsprop":
-#         optimiser = RMSProp(*optim_params[config.optimiser])
-#     elif config.optimiser == "adam":
-#         optimiser = Adam(*optim_params[config.optimiser])
-#     elif config.optimiser == "nadam":
-#         optimiser = Nadam(*optim_params[config.optimiser])
-#     elif config.optimiser == "sgd":
-#         optimiser = SGD(*optim_params[config.optimiser])
-
-#     X_train, y_train, X_val, y_val, X_test, y_test = data(dataset=args.dataset)
-
-#     layers = []
-#     for i in range(config.num_layers):
-#         if i == 0: 
-#             layers.append((LinearLayer(X_train.shape[1], config.hidden_size, config.weight_init), ActivationLayer(config.activation)))
-#         else: 
-#             layers.append((LinearLayer(config.hidden_size, config.hidden_size, config.weight_init), ActivationLayer(config.activation)))
-#     layers.append((LinearLayer(config.hidden_size, y_train.shape[1], config.weight_init), SoftmaxOutputLayer(config.weight_decay)))
-
-
-#     # if config.loss == "cross_entropy":
-#     #     loss = CrossEntropy()
-#     # elif config.loss == "mean_squared":
-#     #     loss = MSE()
-
-#     model = FeedForwardNet(layers)
-#     epoch_train_costs, val_costs, val_accuracies = model.train(X_train, y_train, X_val, y_val, epochs=config.epochs, batch_size=config.batch_size, optimiser=optimiser, loss=config.loss)
-#     test_cost, test_accuracy = test(model, X_test, y_test, num_batches=100)
-
-#     wandb.log({
-#         # "epoch": epoch,
-#         "train_loss": epoch_train_costs[-1],
-#         "val_loss": val_costs[-1],
-#         "val_accuracy": val_accuracies[-1],
-#         "test_loss": test_cost,
-#         "test_accuracy": test_accuracy
-#     })
-
-
 sweep_config_1 = {
-    "name": "Fashion MNIST Sweep",
+    "name": "Fashion MNIST Random Bayes Full",
     "method": "bayes", 
     "metric": {
         "name": "val_accuracy",
@@ -220,13 +149,13 @@ sweep_config_1 = {
     },
     "parameters": {
         "epochs": { 
-            "values": [10, 20, 30] 
+            "values": [10, 20] 
         },
         "batch_size": {
-            "values": [32, 64, 128, 256]
+            "values": [128, 256, 512]
         },
         "learning_rate": {
-            "values": [0.001, 0.01, 0.1]
+            "values": [0.001, 0.0001]
         },
         "optimiser": {
             "values": ["sgd", "momentum", "nag", "rmsprop", "adam", "nadam"]
@@ -235,7 +164,7 @@ sweep_config_1 = {
             "values": ["CrossEntropy", "mean_squared_error"]
         }, 
         "activation": {
-            "values": ["Sigmoid", "tanh", "ReLU"]
+            "values": ["Sigmoid", "tanh", "ReLU", "LeakyReLU", "elu"]
         },
         "num_hidden_layers": {
             "values": [3, 4, 5]
@@ -250,7 +179,13 @@ sweep_config_1 = {
             "values": ["random", "xavier"]
         },
         "weight_decay": {
-            "values": [0.0001, 0.001, 0.01, 0.1]
+            "values": [0.001, 0]
+        },
+        "dropout_rate": {
+            "values": [0.0, 0.1, 0.2]
+        },
+        "batch_norm": {
+            "values": [True, False]
         }
     }
 }
@@ -259,7 +194,7 @@ def train_nn(config = sweep_config_1):
     wandb.init()
     with wandb.init(config=config):
         config = wandb.config
-        wandb.run.name = "e_{}_bs_{}_lr_{}_opt_{}_loss_{}_act_{}_nhl_{}_hls_{}_sc_{}_wi_{}_wd_{}".format(config.epochs, \
+        wandb.run.name = "e_{}_bs_{}_lr_{}_opt_{}_loss_{}_act_{}_nhl_{}_hls_{}_sc_{}_wi_{}_wd_{}_dr_{}_bn_{}".format(config.epochs, \
                                                                                             config.batch_size, \
                                                                                             config.learning_rate, \
                                                                                             config.optimiser, \
@@ -269,15 +204,28 @@ def train_nn(config = sweep_config_1):
                                                                                             config.hidden_layer_size, \
                                                                                             config.scaling, \
                                                                                             config.weight_initialisation, \
-                                                                                            config.weight_decay)
+                                                                                            config.weight_decay, \
+                                                                                            config.dropout_rate, \
+                                                                                            config.batch_norm)
 
         X_train, y_train, X_val, y_val, X_test, y_test = data(dataset='fashion_mnist', scaling=config.scaling)
-        layers = []
-        layers.append((LinearLayer(X_train.shape[1], config.hidden_layer_size, config.weight_initialisation), ActivationLayer(config.activation)))
-        for _ in range(config.num_hidden_layers):
-            layers.append((LinearLayer(config.hidden_layer_size, config.hidden_layer_size, config.weight_initialisation), ActivationLayer(config.activation)))  
-        layers.append((LinearLayer(config.hidden_layer_size, y_train.shape[1], config.weight_initialisation), SoftmaxOutputLayer(config.weight_decay)))
 
+        layers = []
+        layers.append(LinearLayer(X_train.shape[1], config.hidden_layer_size, config.weight_initialisation))
+        layers.append(ActivationLayer(config.activation))
+        if config.dropout_rate > 0:
+            layers.append(DropoutLayer(config.dropout_rate))
+        if config.batch_norm:
+            layers.append(BatchNormLayer(gamma=1, beta=0, momentum=0.9))
+        for _ in range(config.num_hidden_layers):
+            layers.append(LinearLayer(config.hidden_layer_size, config.hidden_layer_size, config.weight_initialisation))
+            layers.append(ActivationLayer(config.activation))
+            if config.dropout_rate > 0:
+                layers.append(DropoutLayer(config.dropout_rate))
+            if config.batch_norm:
+                layers.append(BatchNormLayer(gamma=1, beta=0, momentum=0.9))
+        layers.append(LinearLayer(config.hidden_layer_size, y_train.shape[1], config.weight_initialisation))
+        layers.append(SoftmaxOutputLayer(config.weight_decay))
 
         optim_params = {
                     "sgd": [config.learning_rate],
@@ -302,15 +250,16 @@ def train_nn(config = sweep_config_1):
             optimiser = SGD(*optim_params[config.optimiser])
 
 
-        model = FeedForwardNet(layers)
-        epoch_train_costs, val_costs, val_accuracies = model.train(X_train, y_train, X_val, y_val, config.epochs, optimiser, config.loss, config.batch_size)
+        model = FeedForwardNet(layers, use_wandb=True)
+        epoch_train_costs, epoch_train_accuracy, val_costs, val_accuracies = model.train(X_train, y_train, X_val, y_val, config.epochs, optimiser, config.loss, config.batch_size)
         test_cost, test_accuracy = test(model, X_test, y_test, num_batches=100)
 
 
         wandb.log({
             "epoch_train_costs": epoch_train_costs[-1], \
+            "epoch_train_accuracy": epoch_train_accuracy, \
             "val_costs": val_costs[-1], \
-            "val_accuracies": val_accuracies[-1], \
+            "val_accuracy": val_accuracies[-1], \
             "test_cost": test_cost, \
             "test_accuracy": test_accuracy, \
             "epoch": config.epochs
@@ -336,14 +285,15 @@ if __name__ == "__main__":
     parser.add_argument('-w_i', '--weight_init', type=str, default='random', help='choices: ["random", "xavier"]')
     parser.add_argument('-nhl', '--num_layers', type=int, default=1, help='Number of hidden layers used in feedforward neural network')
     parser.add_argument('-sz', '--hidden_size', type=int, default=4, help='Number of hidden neurons used in a feedforward layer')
-    parser.add_argument('-a', '--activation', type=str, default='sigmoid', help='choices: ["identity", "sigmoid", "tanh", "ReLU"]')
+    parser.add_argument('-a', '--activation', type=str, default='sigmoid', help='choices: ["identity", "sigmoid", "tanh", "ReLU", "LeakyReLU", "elu"]')
     parser.add_argument('-sc', '--scaling', type=str, default='standard', help='choices: ["standard", "minmax"]')
     parser.add_argument('-w', '--wandb', type=bool, default=False, help='Use wandb to log metrics')
     parser.add_argument('-que', '--question', type=int, default=None, help='The Question Number you want to run')
+    parser.add_argument('-do', '--dropout_rate', type=float, default=0.0, help='Dropout rate')
+    parser.add_argument('-bn', '--batch_norm', type=bool, default=False, help='Use batch normalization')
     args = parser.parse_args()
 
     
-    # data = dataset(args.dataset, batch_size=args.batch_size)
     # Load the dataset
     if args.dataset == 'mnist':
         (X_train, y_train), (X_test, y_test) = mnist.load_data()
@@ -357,7 +307,6 @@ if __name__ == "__main__":
         with open("./sweep_config.yml", "r") as file:
             sweep_config = yaml.safe_load(file)
 
-        # question 1
         #question 1
         if args.question == 1:
             wandb.init(project=args.wandb_project)
@@ -391,10 +340,8 @@ if __name__ == "__main__":
 
         #question 4
         elif args.question == 4:
-            # sweep_id = wandb.sweep(sweep_config, project=args.wandb_project)
-            # wandb.agent(sweep_id, function=train_wb)
             sweep_id = wandb.sweep(sweep_config_1, project="Fashion MNIST Sweep")
-            wandb.agent(sweep_id, train_nn)
+            wandb.agent(sweep_id, train_nn, count=100)
             
             
 
@@ -402,7 +349,6 @@ if __name__ == "__main__":
             print("Please Check the Readme and my wandb assignment page")
 
         elif args.question == 7:
-            # data = dataset(args.dataset, batch_size=args.batch_size, test=True) 
             X_train, y_train, X_val, y_val, X_test, y_test = data(args.dataset)   
             layers = []
             for i in range(args.num_layers):
@@ -428,7 +374,6 @@ if __name__ == "__main__":
             y_test_predicted = model.predict(X_test)
             cm = confusion_matrix(y_test, y_test_predicted)
             ### Confusion Matrix
-
             df_cm = pd.DataFrame(cm, index = range(1, len(cm)+1), columns = range(1, len(cm) + 1))
             plt.figure(figsize=(12, 5))
             tmp = sns.heatmap(df_cm, annot=True)

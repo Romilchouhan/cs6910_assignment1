@@ -41,20 +41,37 @@ class ReLU():
 
     def call(self, x):
         # clip to avoid overflow
-        x = np.clip(x, -500, 500)
+        # x = np.clip(x, -500, 500)
         return np.maximum(0, x)
     
     def deriv(self, x):
         return np.where(x > 0, 1, 0)
 
+class LeakyReLU():
+    def __init__(self, alpha=0.01) -> None:
+        self.alpha = alpha
+
+    def call(self, x):
+        return np.where(x > 0, x, x * self.alpha)
+    
+    def deriv(self, x):
+        return np.where(x > 0, 1, self.alpha)
+    
+class ELU():
+    def __init__(self, alpha=0.01) -> None:
+        self.alpha = alpha
+
+    def call(self, x):
+        return np.where(x > 0, x, self.alpha * (np.exp(x) - 1))
+    
+    def deriv(self, x):
+        return np.where(x > 0, 1, self.call(x) + self.alpha)
 
 class Softmax():
     def __init__(self) -> None:
         pass
 
     def call(self, x):
-        # val = np.exp(x) / np.sum(np.exp(x), axis=0)
-        # return val
         exps = np.exp(x - np.max(x))
         if exps.ndim == 1:
             return exps / np.sum(exps, axis=0)

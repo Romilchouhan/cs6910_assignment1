@@ -29,17 +29,7 @@ class CrossEntropy():
         self.a = a 
         self.y = y
         loss = -np.sum(np.sum(self.y * np.log(self.a + epsilon))) / self.y.shape[0]
-        # loss = -np.sum(y * np.log(a))/float(y.shape[0])
         return loss
-
-    # def calc_loss(self, a, y):
-    #     #convert nan to 0
-    #     # a = np.nan_to_num(a)
-    #     try:
-    #         y.shape[0]
-    #     except:
-    #         return 0
-    #     return -np.multiply(y, np.log(a)).sum() / y.shape[0]  # y.shape[0] is the number of samples
     
     def deriv(self, a, y):
         m = y.shape[0]
