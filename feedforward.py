@@ -97,6 +97,6 @@ class FeedForwardNet:
 
     def predict(self, X):
         """Returns the predictions for the given input samples"""
-        out = self.forward(X)[-1]
+        out = self.forward(X, mode='test')[-1]
         return out
 

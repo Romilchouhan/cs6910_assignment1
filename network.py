@@ -127,12 +127,13 @@ class DropoutLayer(Layer):
 
     def get_output(self, X, mode='train'):
         """Return the output of this layer"""
-        self.keep_prob = 1 - self.dropout_rate
-        self.D1 = np.random.rand(X.shape[0], X.shape[1])
-        self.D1 = self.D1 < self.keep_prob
-        self.D1 = self.D1.astype(int)
-        X = np.multiply(X, self.D1)
-        X = X / self.dropout_rate
+        if mode == 'train':
+            self.keep_prob = 1 - self.dropout_rate
+            self.D1 = np.random.rand(X.shape[0], X.shape[1])
+            self.D1 = self.D1 < self.keep_prob
+            self.D1 = self.D1.astype(int)
+            X = np.multiply(X, self.D1)
+            X = X / self.dropout_rate
         return X
     
     def get_input_grad(self, Y, output_grad=None, T=None):
