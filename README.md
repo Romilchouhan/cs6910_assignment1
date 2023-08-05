@@ -4,7 +4,7 @@ This repository contains the code base for Assignment 1 for the course CS6910: D
 
 
 The problem statement calls for creating and training a "plain vanilla" feed-forward neural network from start, mainly using Python's Numpy package. 
-The problem statement can be looked [here](https://wandb.ai/berserank/CS6910%20Assignment%201/reports/CS6910-Assignment-1--VmlldzozNzM0MTc4?accessToken=dmmeww9v6vdgsduqvh993yw1q821vpf18kjg2xj1z4ltgepapth6fkoyudkyfry8)
+The problem statement can be looked [here](https://api.wandb.ai/links/romilchouhan/9o88sdop)
 
 ## Codebase structure: 
 * __network.py__ - This file contains the code for the network.
